@@ -92,6 +92,6 @@ done
 # ========== CLEANUP ==========
 rm -f $INSTALL_SCRIPT
 
-echo "🎉 Splunk Universal Forwarder installation completed on all instances."
+echo " Splunk Universal Forwarder installation completed on all instances."
 
 
