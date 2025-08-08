@@ -1,1 +1,97 @@
+#!/bin/bash
+
+# ========== CONTROL NODE PREP ==========
+echo "Installing sshpass on control node..."
+if ! command -v sshpass &>/dev/null; then
+  if [ -f /etc/redhat-release ]; then
+    sudo yum install -y epel-release
+    sudo yum install -y sshpass
+  elif [ -f /etc/debian_version ]; then
+    sudo apt update
+    sudo apt install -y sshpass
+  else
+    echo "Unsupported OS. Please install sshpass manually."
+    exit 1
+  fi
+fi
+
+# ========== CONFIGURATION ==========
+USER="sccStudent"
+PASSWORD="cx77ccoy"  # Replace with your actual lab password
+
+# List of 6 target instance IPs
+IPS=("1" "3" "3" "1" "1" "1")
+
+# Splunk UF version and download URL
+UF_VERSION="9.3.0"
+UF_BUILD="51ccf43db5bd"
+UF_FILENAME="splunkforwarder-${UF_VERSION}-${UF_BUILD}-Linux-x86_64.tgz"
+UF_URL="https://download.splunk.com/products/universalforwarder/releases/${UF_VERSION}/linux/${UF_FILENAME}"
+INSTALL_SCRIPT="/tmp/install_uf_remote.sh"
+
+# ========== GENERATE REMOTE UF INSTALL SCRIPT ==========
+cat <<'EOF' > $INSTALL_SCRIPT
+#!/bin/bash
+
+set -e
+
+# Install wget if missing
+if ! command -v wget &>/dev/null; then
+  echo "Installing wget..."
+  sudo yum install -y wget || sudo apt install -y wget
+fi
+
+# Create splunk user if needed
+if ! id splunk &>/dev/null; then
+  sudo useradd -m splunk
+fi
+
+
+
+# Download Splunk UF
+echo "Downloading Splunk Universal Forwarder..."
+rm -f /tmp/uf.tgz
+wget -O /tmp/uf.tgz "https://download.splunk.com/products/universalforwarder/releases/9.3.0/linux/splunkforwarder-9.3.0-51ccf43db5bd-Linux-x86_64.tgz"
+
+# Validate and extract
+if ! tar -tzf /tmp/uf.tgz &>/dev/null; then
+  echo " UF download is corrupted. Exiting."
+  exit 1
+fi
+
+# Extract and install
+sudo rm -rf /opt/splunkforwarder
+sudo tar -xvf /tmp/uf.tgz -C /opt
+sudo chown -R splunk:splunk /opt/splunkforwarder
+
+# Start UF
+sudo -u splunk /opt/splunkforwarder/bin/splunk start --accept-license --answer-yes --no-prompt
+
+# Enable boot-start as root
+sudo /opt/splunkforwarder/bin/splunk enable boot-start -user splunk
+EOF
+
+chmod +x $INSTALL_SCRIPT
+
+# ========== EXECUTE INSTALL ON EACH INSTANCE ==========
+echo "=== Installing Splunk Universal Forwarder on remote instances ==="
+for ip in "${IPS[@]}"; do
+  echo ">>> Installing UF on $ip..."
+
+  sshpass -p "$PASSWORD" scp -o StrictHostKeyChecking=no $INSTALL_SCRIPT ${USER}@${ip}:/tmp/
+
+  sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no ${USER}@${ip} "
+    echo '$PASSWORD' | sudo -S bash -c 'echo \"$USER ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/$USER'
+    chmod +x /tmp/install_uf_remote.sh
+    echo '$PASSWORD' | sudo -S /tmp/install_uf_remote.sh
+  "
+
+  echo " UF installed on $ip"
+done
+
+# ========== CLEANUP ==========
+rm -f $INSTALL_SCRIPT
+
+echo "🎉 Splunk Universal Forwarder installation completed on all instances."
+
 
