@@ -1,0 +1,94 @@
+#!/bin/bash
+
+==== CONTROL NODE PREP ==========
+echo "Installing sshpass on control node..."
+if ! command -v sshpass &>/dev/null; then
+  if [ -f /etc/redhat-release ]; then
+    sudo yum install -y epel-release
+    sudo yum install -y sshpass
+  elif [ -f /etc/debian_version ]; then
+    sudo apt update
+    sudo apt install -y sshpass
+  else
+    echo "Unsupported OS. Please install sshpass manually."
+    exit 1
+  fi
+fi
+
+# ========== CONFIGURATION ==========
+USER="sccStudent"
+PASSWORD="cx77ccoy"  # Replace with your actual password
+
+# IPs of all instances EXCEPT the control node
+IPS=("")
+
+# Splunk variables
+SPLUNK_VERSION="9.3.0"
+SPLUNK_BUILD="51ccf43db5bd"
+SPLUNK_FILENAME="splunk-${SPLUNK_VERSION}-${SPLUNK_BUILD}-Linux-x86_64.tgz"
+SPLUNK_URL="https://download.splunk.com/products/splunk/releases/${SPLUNK_VERSION}/linux/${SPLUNK_FILENAME}"
+INSTALL_SCRIPT="/tmp/install_splunk_remote.sh"
+
+# ========== GENERATE REMOTE INSTALL SCRIPT ==========
+cat <<'EOF' > $INSTALL_SCRIPT
+#!/bin/bash
+
+set -e
+
+# Ensure wget is installed
+if ! command -v wget &>/dev/null; then
+  echo "Installing wget..."
+  sudo yum install -y wget || sudo apt install -y wget
+fi
+
+# Create splunk user if it doesn't exist
+if ! id splunk &>/dev/null; then
+  sudo useradd -m splunk
+fi
+# Download Splunk
+echo "Downloading Splunk..."
+rm -f /tmp/splunk.tgz
+wget -O /tmp/splunk.tgz "https://download.splunk.com/products/splunk/releases/9.3.0/linux/splunk-9.3.0-51ccf43db5bd-Linux-x86_64.tgz"
+
+# Validate and extract
+if ! tar -tzf /tmp/splunk.tgz &>/dev/null; then
+  echo "Download corrupt. Exiting."
+  exit 1
+fi
+
+# Extract to /opt
+sudo rm -rf /opt/splunk
+sudo tar -xvf /tmp/splunk.tgz -C /opt
+sudo chown -R splunk:splunk /opt/splunk
+
+# Start Splunk
+sudo -u splunk /opt/splunk/bin/splunk start --accept-license --answer-yes --no-prompt
+
+# Enable boot-start
+sudo /opt/splunk/bin/splunk enable boot-start -user splunk
+EOF
+
+chmod +x $INSTALL_SCRIPT
+
+# ========== RUN ON ALL REMOTE NODES ==========
+echo "=== Starting remote Splunk installations ==="
+for ip in "${IPS[@]}"; do
+  echo ">>> Installing on $ip..."
+
+  # Copy script
+  sshpass -p "$PASSWORD" scp -o StrictHostKeyChecking=no $INSTALL_SCRIPT ${USER}@${ip}:/tmp/
+
+  # SSH and execute with password passed to sudo
+  sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no ${USER}@${ip} "
+    echo '$PASSWORD' | sudo -S bash -c 'echo \"$USER ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/$USER'
+    chmod +x /tmp/install_splunk_remote.sh
+    echo '$PASSWORD' | sudo -S /tmp/install_splunk_remote.sh
+  "
+
+  echo "Done with $ip"
+done
+
+
+# ========== CLEANUP ==========
+rm -f $INSTALL_SCRIPT
+
