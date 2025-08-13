@@ -16,8 +16,8 @@ if ! command -v sshpass &>/dev/null; then
 fi
 
 # ========== CONFIGURATION ==========
-USER="sccStudent"
-PASSWORD="cx77ccoy"  # Replace with your actual password
+USER=""
+PASSWORD="" 
 
 # IPs of all instances EXCEPT the control node
 IPS=("")
